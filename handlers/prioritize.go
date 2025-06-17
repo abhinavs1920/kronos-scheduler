@@ -1,11 +1,23 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"math"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/prometheus/client_golang/api"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	"github.com/prometheus/common/model"
 	corev1 "k8s.io/api/core/v1"
 	schedulerapi "k8s.io/kube-scheduler/extender/v1"
+)
+
+const (
+	prometheusURL = "http://prometheus-kube-prometheus-prometheus.monitoring:9090"
+	defaultEnergy = 100.0
 )
 
 // Prioritize handles the /prioritize extender endpoint
@@ -23,16 +35,75 @@ func Prioritize(c *fiber.Ctx) error {
 
 	var priorityList []schedulerapi.HostPriority
 	for _, node := range args.Nodes.Items {
-		score := calculateScore(node, jobType)
-		log.Printf("Scored node %s for jobType=%s → %d", node.Name, jobType, score)
+		// Fetch energy in Watts for the node.
+		energy, err := queryNodeEnergy(prometheusURL, node.Name)
+		if err != nil {
+			log.Printf("Energy query fallback for node %s: %v", node.Name, err)
+		}
+
+		// Normalise energy to 0–100 where 1000 W → 100.
+		energyNorm := math.Min(energy/10.0, 100.0)
+
+		// Existing queuing score (0–100, higher is better).
+		queueScore := calculateScore(node, jobType)
+
+		// Weight selection.
+		var w1, w2 float64
+		if jobType == "long" {
+			w1, w2 = 0.6, 0.4
+		} else {
+			w1, w2 = 0.4, 0.6
+		}
+
+		finalScore := int64(w1*(100.0-energyNorm) + w2*float64(queueScore))
+		// Clamp to scheduler score bounds.
+		if finalScore < 0 {
+			finalScore = 0
+		}
+		if finalScore > 100 {
+			finalScore = 100
+		}
+
+		log.Printf("Node %s: energy=%.2f W (norm=%.1f), queueScore=%d, final=%d", node.Name, energy, energyNorm, queueScore, finalScore)
 
 		priorityList = append(priorityList, schedulerapi.HostPriority{
 			Host:  node.Name,
-			Score: score,
+			Score: finalScore,
 		})
 	}
 
 	return c.JSON(priorityList)
+}
+
+// queryNodeEnergy queries Prometheus for the power consumption (Watts) of a node using Kepler metrics.
+// On any error it returns defaultEnergy and the error so that callers can log/handle as needed.
+func queryNodeEnergy(url, node string) (float64, error) {
+	client, err := api.NewClient(api.Config{Address: url})
+	if err != nil {
+		return defaultEnergy, fmt.Errorf("prometheus client init: %w", err)
+	}
+
+	v1api := v1.NewAPI(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	query := fmt.Sprintf(`rate(kepler_node_package_joules_total{node="%s"}[1m])`, node)
+	result, warnings, err := v1api.Query(ctx, query, time.Now())
+	if len(warnings) > 0 {
+		log.Printf("prometheus warnings for node %s: %v", node, warnings)
+	}
+	if err != nil {
+		return defaultEnergy, fmt.Errorf("prometheus query: %w", err)
+	}
+
+	vector, ok := result.(model.Vector)
+	if !ok || len(vector) == 0 {
+		return defaultEnergy, fmt.Errorf("no data returned for node %s", node)
+	}
+
+	// The rate gives Joules/second which is Watts.
+	energy := float64(vector[0].Value)
+	return energy, nil
 }
 
 // calculateScore returns a node score (0–100) based on job type and simplified queue model
