@@ -21,18 +21,22 @@ subjects:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: my-scheduler-config
+  name: scheduler-config
   namespace: kube-system
 data:
-  config.yaml: |
+  scheduler-config.yaml: |
     apiVersion: kubescheduler.config.k8s.io/v1
     kind: KubeSchedulerConfiguration
     profiles:
-    - schedulerName: my-scheduler
+    - schedulerName: kronos-scheduler
       plugins:
+        filter:
+          enabled:
+          - name: EnergyAware
         score:
-          disabled: []
-          enabled: []
+          enabled:
+          - name: EnergyAware
+            
       pluginConfig:
       - name: DefaultPreemption
         args:
@@ -42,22 +46,20 @@ data:
           minCandidateNodesAbsolute: 100
     leaderElection:
       leaderElect: true
-      resourceName: my-scheduler
+      resourceName: kronos-scheduler
       resourceNamespace: kube-system
-    extenders:
-    - urlPrefix: "http://my-scheduler-extender.kube-system/"
-      filterVerb: "filter"
-      prioritizeVerb: "prioritize"
-      weight: 1
-      nodeCacheCapable: false
-      managedResources:
-      - name: "example.com/foo"
-        ignoredByScheduler: true
+    
+     
+      
+      
+      
+      
+      
+      
+        
 ---
 apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: my-scheduler-policy
+
   namespace: kube-system
 data:
  policy.cfg : |

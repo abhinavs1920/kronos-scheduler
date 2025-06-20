@@ -13,7 +13,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o scheduler ./cmd/scheduler
+RUN CGO_ENABLED=0 GOOS=linux go build -o kube-scheduler ./cmd/scheduler
 
 # Final stage
 FROM alpine:3.18
@@ -21,10 +21,13 @@ FROM alpine:3.18
 WORKDIR /app
 
 # Copy the binary from builder
-COPY --from=builder /app/scheduler .
+COPY --from=builder /app/kube-scheduler /usr/local/bin/kube-scheduler
 
-# Expose the port the app runs on
-EXPOSE 8080
+# Create directory for config
+RUN mkdir -p /etc/kubernetes
 
-# Command to run the executable
-CMD ["./scheduler"]
+# Copy the scheduler config
+COPY manifests/scheduler-config.yaml /etc/kubernetes/scheduler-config.yaml
+
+# Set the entrypoint
+ENTRYPOINT ["/usr/local/bin/kube-scheduler", "--config=/etc/kubernetes/scheduler-config.yaml"]

@@ -8,13 +8,17 @@ spec:
   replicas: 2
   selector:
     matchLabels:
-      app: test
+      app: test-app
   template:
     metadata:
       labels:
-        app: test
+        app: test-app
     spec:
-      schedulerName: my-scheduler
+      schedulerName: kronos-scheduler
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
       containers:
       - name: nginx
         image: nginx:alpine

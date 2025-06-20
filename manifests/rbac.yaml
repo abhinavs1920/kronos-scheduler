@@ -1,0 +1,21 @@
+# rbac-full-admin.yaml
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kronos-scheduler
+  namespace: kube-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kronos-scheduler-full-admin
+subjects:
+  - kind: ServiceAccount
+    name: kronos-scheduler
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
